@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>ADHD Reminder App</title>
+    <style>
+        :root {
+            --bg: #f4f4f4;
+            --fg: #333;
+            --accent: #d9534f;
+            --accent-light: #f2b6b4;
+            --button-bg: #5bc0de;
+            --button-hover: #31b0d5;
+            --font: 'Segoe UI', sans-serif;
+        }
+
+        body {
+            background: var(--bg);
+            color: var(--fg);
+            font-family: var(--font);
+            margin: 0;
+            padding: 20px;
+            max-width: 700px;
+            margin: auto;
+        }
+
+        h1 {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        label {
+            display: block;
+            margin: 10px 0 5px;
+        }
+
+        input[type="text"],
+        input[type="datetime-local"] {
+            width: 100%;
+            padding: 10px;
+            font-size: 1em;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+        }
+
+        button {
+            margin-top: 10px;
+            padding: 10px 20px;
+            font-size: 1em;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            color: white;
+            background-color: #007bff; /* bright blue */
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+            transition: background-color 0.2s ease, transform 0.1s ease;
+        }
+
+            button:hover {
+                background-color: #0056b3;
+            }
+
+            button:active {
+                transform: scale(0.97);
+            }
+
+            button:disabled {
+                background-color: #aaa;
+                cursor: not-allowed;
+                color: #eee;
+            }
+
+        #acknowledge-button {
+            background: var(--accent);
+            display: none;
+        }
+
+        #annoy-toggle {
+            background: var(--button-bg);
+            margin-left: 10px;
+        }
+
+            #annoy-toggle:hover {
+                background: var(--button-hover);
+            }
+
+        ul {
+            list-style: none;
+            padding: 0;
+            margin-top: 20px;
+        }
+
+        li {
+            background: white;
+            padding: 12px 15px;
+            margin-bottom: 10px;
+            border-left: 5px solid #5bc0de;
+            border-radius: 4px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .missed {
+            color: var(--accent);
+            font-weight: bold;
+            margin-left: 10px;
+        }
+
+        .heavy-shake {
+            animation: heavyShake 0.1s infinite;
+        }
+
+        @keyframes heavyShake {
+            0% {
+                transform: translate(5px, 3px) rotate(1deg);
+            }
+
+            25% {
+                transform: translate(-5px, -3px) rotate(-1deg);
+            }
+
+            50% {
+                transform: translate(6px, -4px) rotate(1deg);
+            }
+
+            75% {
+                transform: translate(-6px, 4px) rotate(-1deg);
+            }
+
+            100% {
+                transform: translate(5px, -3px) rotate(1deg);
+            }
+        }
+
+        .button-group {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+            flex-wrap: wrap;
+        }
+    </style>
+</head>
+<body>
+    <audio id="yippee-sound" src="https://www.myinstants.com/media/sounds/yippee.mp3" preload="auto"></audio>
+    <canvas id="confetti-canvas" style="position:fixed;top:0;left:0;width:100vw;height:100vh;pointer-events:none;z-index:999;"></canvas>
+
+    <h1>ADHD Reminder App</h1>
+
+    <label for="event-title">Event:</label>
+    <input type="text" id="event-title" placeholder="e.g. Take meds">
+
+    <label for="event-time">Date & Time:</label>
+    <input type="datetime-local" id="event-time">
+
+    <div class="button-group">
+        <button onclick="addEvent()">Add Event</button>
+        <button onclick="toggleAnnoying()" id="annoy-toggle">Make It Annoying: OFF</button>
+    </div>
+
+    <h2>Upcoming Events</h2>
+    <ul id="event-list"></ul>
+
+    <button id="acknowledge-button" onclick="acknowledgeAlarm()">Acknowledge Missed Event</button>
+
+    <audio id="alarm-sound" src="https://actions.google.com/sounds/v1/alarms/alarm_clock.ogg" preload="auto" loop></audio>
+
+    <script>
+        const eventList = document.getElementById('event-list');
+        const alarmSound = document.getElementById('alarm-sound');
+        const toggleButton = document.getElementById('annoy-toggle');
+        const acknowledgeButton = document.getElementById('acknowledge-button');
+
+        let events = JSON.parse(localStorage.getItem('adhdEvents')) || [];
+        let annoyingMode = false;
+        let alarmActive = false;
+
+        function saveEvents() {
+            localStorage.setItem('adhdEvents', JSON.stringify(events));
+        }
+
+        function markEventDone(id) {
+            const idx = events.findIndex(e => e.id === id);
+            if (idx !== -1) {
+                const completed = events.splice(idx, 1)[0];
+                completed.notified = false;
+                completed.time = new Date(Date.now() - 1000).toISOString(); // mark in past
+                events.push(completed);
+                saveEvents();
+                renderEvents();
+
+                // YIPPEE CELEBRATION
+                yippeeSound.play();
+                launchConfetti();
+            }
+        }
+
+        function renderEvents() {
+            const now = new Date();
+            const futureEvents = [];
+            const pastEvents = [];
+
+            eventList.innerHTML = '';
+
+            events.forEach((event, i) => {
+                const eventTime = new Date(event.time);
+                const isPast = eventTime < now;
+
+                // Sweep up any completed or missed event (including retroactively done ones)
+                if (isPast || event.notified === false) {
+                    if (event.notified !== true && event.notified !== false) {
+                        event.notified = true; // mark as missed if not already marked
+                        if (annoyingMode && !alarmActive) {
+                            startAlarm(event.title);
+                        }
+                    }
+                    pastEvents.push(event);
+                } else {
+                    futureEvents.push(event);
+                }
+            });
+
+            // Trim to 5 most recent past events
+            pastEvents.sort((a, b) => new Date(b.time) - new Date(a.time));
+            const recentPast = pastEvents.slice(0, 5);
+
+            events = [...recentPast, ...futureEvents.map(e => {
+                const { index, ...rest } = e;
+                return rest;
+            })];
+            saveEvents();
+
+            // Show past events
+            recentPast.forEach(event => {
+                const li = document.createElement('li');
+                const eventTime = new Date(event.time);
+                li.textContent = `${event.title} at ${eventTime.toLocaleString()}`;
+
+                const status = document.createElement('span');
+                status.className = 'missed';
+                status.textContent = event.notified ? '[MISSED]' : '[DONE]';
+                li.appendChild(status);
+
+                eventList.appendChild(li);
+            });
+
+            // Show future events with optional "Mark as Done" button
+            futureEvents.forEach(event => {
+                const li = document.createElement('li');
+                const eventTime = new Date(event.time);
+                li.textContent = `${event.title} at ${eventTime.toLocaleString()}`;
+
+                if (event.notified === false) {
+                    // Already completed early — show DONE label
+                    const doneLabel = document.createElement('span');
+                    doneLabel.className = 'missed';
+                    doneLabel.textContent = ' [DONE]';
+                    li.appendChild(doneLabel);
+                } else {
+                    // Still pending — show button
+                    const doneBtn = document.createElement('button');
+                    doneBtn.textContent = 'Mark as Done';
+                    doneBtn.style.marginLeft = '10px';
+                    doneBtn.style.padding = '4px 8px';
+                    doneBtn.style.fontSize = '0.9em';
+                    doneBtn.onclick = () => markEventDone(event.id);
+                    li.appendChild(doneBtn);
+                }
+
+                eventList.appendChild(li);
+            });
+        }
+
+        function addEvent() {
+            const title = document.getElementById('event-title').value;
+            const time = document.getElementById('event-time').value;
+            if (!title || !time) {
+                alert("Please fill out both fields.");
+                return;
+            }
+            const id = Date.now() + Math.random(); // unique ID
+            events.push({ id, title, time });
+            saveEvents();
+            renderEvents();
+        }
+
+        function toggleAnnoying() {
+            annoyingMode = !annoyingMode;
+            toggleButton.textContent = 'Make It Annoying: ' + (annoyingMode ? 'ON' : 'OFF');
+        }
+
+        function startAlarm(title) {
+            alarmActive = true;
+            document.body.classList.add('heavy-shake');
+            alarmSound.play();
+            if (navigator.vibrate) navigator.vibrate([500, 300, 500, 300, 500]);
+            alert('MISSED EVENT: ' + title);
+            acknowledgeButton.style.display = 'inline-block';
+        }
+
+        function acknowledgeAlarm() {
+            alarmActive = false;
+            document.body.classList.remove('heavy-shake');
+            alarmSound.pause();
+            alarmSound.currentTime = 0;
+            acknowledgeButton.style.display = 'none';
+        }
+
+        setInterval(renderEvents, 30 * 1000);
+        renderEvents();
+
+        const yippeeSound = document.getElementById('yippee-sound');
+        const confettiCanvas = document.getElementById('confetti-canvas');
+        const ctx = confettiCanvas.getContext('2d');
+        let confettiPieces = [];
+
+        function launchConfetti() {
+            const colors = ['#ff0', '#f0f', '#0ff', '#f77', '#7f7'];
+            const width = confettiCanvas.width = window.innerWidth;
+            const height = confettiCanvas.height = window.innerHeight;
+
+            confettiPieces = Array.from({ length: 150 }, () => ({
+                x: Math.random() * width,
+                y: Math.random() * height - height,
+                r: Math.random() * 4 + 1,
+                d: Math.random() * 10 + 5,
+                color: colors[Math.floor(Math.random() * colors.length)],
+                tilt: Math.random() * 10 - 10,
+                tiltAngleIncremental: Math.random() * 0.1 + 0.05,
+                tiltAngle: 0
+            }));
+
+            requestAnimationFrame(drawConfetti);
+            setTimeout(() => confettiPieces = [], 3000); // clear after 3s
+        }
+
+        function drawConfetti() {
+            ctx.clearRect(0, 0, confettiCanvas.width, confettiCanvas.height);
+            confettiPieces.forEach(p => {
+                p.tiltAngle += p.tiltAngleIncremental;
+                p.y += Math.cos(p.d) + 3;
+                p.x += Math.sin(p.d);
+                p.tilt = Math.sin(p.tiltAngle) * 15;
+
+                ctx.beginPath();
+                ctx.lineWidth = p.r;
+                ctx.strokeStyle = p.color;
+                ctx.moveTo(p.x + p.tilt + p.r, p.y);
+                ctx.lineTo(p.x + p.tilt, p.y + p.tilt + p.r);
+                ctx.stroke();
+            });
+
+            if (confettiPieces.length > 0) {
+                requestAnimationFrame(drawConfetti);
+            }
+        }
+    </script>
+</body>
+</html>
